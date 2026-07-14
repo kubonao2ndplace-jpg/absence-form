@@ -49,9 +49,9 @@
       font-size: 14px;
     }
 
-    input,
     select,
-    textarea {
+    textarea,
+    input[type="date"] {
       width: 100%;
       box-sizing: border-box;
       font-size: 16px;
@@ -143,11 +143,6 @@
 
     <form id="absenceForm">
       <label>
-        名前 <span class="required">必須</span>
-      </label>
-      <input type="text" id="name" required placeholder="例：山田 太郎">
-
-      <label>
         欠席する日 <span class="required">必須</span>
       </label>
       <input type="date" id="absenceDate" required>
@@ -186,40 +181,33 @@
   </div>
 
   <script>
-    // ==============================
-    // ★ここを自分の環境に合わせて変更
-    // ==============================
-
     const LIFF_ID = '2010669576-r6T8lw7x';
-
     const GAS_WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbzZu12vFTSb4Z_oJ62jCaHX9Nyxx-FxDteWqeqAqj5bMO9FSRAJOuG86SvhO5v3DEee/exec';
 
-    // ==============================
+    let lineProfile = { userId: '', displayName: '' };
 
-    let lineProfile = {
-      userId: '',
-      displayName: ''
+    const exampleTextMap = {
+      '体調不良': '朝から頭痛とだるさがあります。今日は自宅で休みます。',
+      '通院': 'この日は診察のため病院に行きますので、お休みします。',
+      '家庭の事情': '家庭の事情で自宅にいます。今日はお休みします。',
+      '交通機関の事情': '交通機関の遅延により自宅で待機しています。',
+      'その他': '詳細を入力してください。'
     };
 
     window.onload = async function () {
       setToday();
-
       try {
         await liff.init({ liffId: LIFF_ID });
-
         if (!liff.isInClient()) {
           showStatus(
-            'このフォームはLINEアプリ内から開いてください。<br>' +
-            '公式LINEのトーク画面、またはリッチメニューから開いてください。',
+            'このフォームはLINEアプリ内から開いてください。<br>公式LINEのトーク画面、またはリッチメニューから開いてください。',
             'error'
           );
           return;
         }
-
         const profile = await liff.getProfile();
         lineProfile.userId = profile.userId || '';
         lineProfile.displayName = profile.displayName || '';
-
       } catch (error) {
         showStatus(
           'LINE連携の初期化に失敗しました。<br>' +
@@ -229,6 +217,12 @@
         );
       }
     };
+
+    // 欠席理由に応じて「現在の状況」placeholderを変更
+    document.getElementById('reason').addEventListener('change', function() {
+      const example = exampleTextMap[this.value] || '';
+      document.getElementById('condition').placeholder = example;
+    });
 
     function setToday() {
       const today = new Date();
@@ -240,7 +234,6 @@
 
     document.getElementById('absenceForm').addEventListener('submit', async function (e) {
       e.preventDefault();
-
       const submitBtn = document.getElementById('submitBtn');
       submitBtn.disabled = true;
       submitBtn.textContent = '送信中...';
@@ -248,7 +241,6 @@
       const formData = {
         lineDisplayName: lineProfile.displayName,
         lineUserId: lineProfile.userId,
-        name: document.getElementById('name').value.trim(),
         absenceDate: document.getElementById('absenceDate').value,
         reason: document.getElementById('reason').value,
         condition: document.getElementById('condition').value.trim(),
@@ -259,64 +251,29 @@
       const messageText = createLineMessage(formData);
 
       try {
-        // ① まず本人メッセージとして公式LINEトークへ送信
-        await liff.sendMessages([
-          {
-            type: 'text',
-            text: messageText
-          }
-        ]);
-
-        // ② 次にGASへ送ってスプレッドシート保存
-        // GASはCORSの都合で結果を直接読み取れないため no-cors で送信します
+        await liff.sendMessages([{ type: 'text', text: messageText }]);
         await fetch(GAS_WEB_APP_URL, {
           method: 'POST',
           mode: 'no-cors',
-          headers: {
-            'Content-Type': 'application/x-www-form-urlencoded'
-          },
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
           body: new URLSearchParams(formData)
         });
-
         showStatus('送信しました。スタッフからの返信をお待ちください。', 'ok');
-
-        setTimeout(function () {
-          if (liff.isInClient()) {
-            liff.closeWindow();
-          }
-        }, 1200);
-
+        setTimeout(() => { if (liff.isInClient()) liff.closeWindow(); }, 1200);
       } catch (error) {
-        let contextText = '';
-        let permissionText = '';
-
-        try {
-          contextText = JSON.stringify(liff.getContext());
-        } catch (e) {
-          contextText = '取得できませんでした';
-        }
-
-        try {
-          const permission = await liff.permission.query('chat_message.write');
-          permissionText = JSON.stringify(permission);
-        } catch (e) {
-          permissionText = '取得できませんでした';
-        }
+        let contextText = '', permissionText = '';
+        try { contextText = JSON.stringify(liff.getContext()); } catch(e){ contextText = '取得できませんでした'; }
+        try { const permission = await liff.permission.query('chat_message.write'); permissionText = JSON.stringify(permission); } catch(e){ permissionText = '取得できませんでした'; }
 
         showStatus(
           '送信に失敗しました。<br><br>' +
-          '【エラー内容】<br>' +
-          escapeHtml(error.code || '') + '<br>' +
+          '【エラー内容】<br>' + escapeHtml(error.code || '') + '<br>' +
           escapeHtml(error.message || '') + '<br><br>' +
-          '【LINE内で開いているか】<br>' +
-          escapeHtml(String(liff.isInClient())) + '<br><br>' +
-          '【起動元情報】<br>' +
-          escapeHtml(contextText) + '<br><br>' +
-          '【chat_message.write権限】<br>' +
-          escapeHtml(permissionText),
+          '【LINE内で開いているか】<br>' + escapeHtml(String(liff.isInClient())) + '<br><br>' +
+          '【起動元情報】<br>' + escapeHtml(contextText) + '<br><br>' +
+          '【chat_message.write権限】<br>' + escapeHtml(permissionText),
           'error'
         );
-
         submitBtn.disabled = false;
         submitBtn.textContent = 'もう一度送信する';
       }
@@ -326,7 +283,6 @@
       return [
         '【欠席連絡】',
         '',
-        '名前：' + data.name,
         '欠席する日：' + formatDateForMessage(data.absenceDate),
         '欠席理由：' + data.reason,
         '現在の状況：' + data.condition,
@@ -336,10 +292,8 @@
 
     function formatDateForMessage(dateText) {
       if (!dateText) return '';
-
       const parts = dateText.split('-');
       if (parts.length !== 3) return dateText;
-
       return Number(parts[1]) + '月' + Number(parts[2]) + '日';
     }
 
